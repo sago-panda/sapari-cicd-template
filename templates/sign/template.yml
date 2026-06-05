@@ -9,11 +9,11 @@ spec:
     image:
       default: $CI_REGISTRY_IMAGE
     cosign_version:
-      default: v2.4.1
+      default: v3.0.6
 ---
 sign:
   stage: $[[ inputs.stage ]]
-  image: alpine:3.20
+  image: alpine:3.22
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   needs:

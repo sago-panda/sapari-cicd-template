@@ -7,7 +7,7 @@ spec:
     stage:
       default: scan
     trivy_image:
-      default: aquasec/trivy:0.58.1
+      default: aquasec/trivy:0.71.0
     image_tar:
       default: image.tar
     severity:
