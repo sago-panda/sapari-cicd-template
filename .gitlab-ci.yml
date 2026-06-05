@@ -4,7 +4,9 @@ stages: [test, release]
 # 컴포넌트 template.yml 들이 valid YAML 인지 가벼운 검증
 lint-components:
   stage: test
-  image: mikefarah/yq:4
+  image:
+    name: mikefarah/yq:4
+    entrypoint: [""]   # ENTRYPOINT(yq) 비워서 GitLab 이 sh 로 script 실행하게 함
   script:
     - for f in templates/*/template.yml; do echo "check $f"; yq e 'true' "$f" >/dev/null; done
   rules:
