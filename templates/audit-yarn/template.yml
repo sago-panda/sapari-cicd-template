@@ -1,0 +1,31 @@
+# audit-yarn — Yarn Berry 네이티브 의존성 취약점 점검 (yarn npm audit)
+#   gemnasium Dependency-Scanning 이 Yarn Berry yarn.lock v9 를 못 읽어 대체.
+#   PnP/Berry 를 네이티브로 이해하므로 파서 문제 없음. npm advisory DB 조회(네트워크 필요).
+spec:
+  inputs:
+    stage:
+      default: validate
+    node_image:
+      default: node:22-bookworm-slim
+    severity:
+      # 이 심각도 이상이면 실패(게이트). info|low|moderate|high|critical
+      default: high
+    allow_failure:
+      type: boolean
+      default: false           # true 면 리포트만(파이프라인 차단 안 함)
+---
+audit:yarn:
+  stage: $[[ inputs.stage ]]
+  image: $[[ inputs.node_image ]]
+  allow_failure: $[[ inputs.allow_failure ]]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  cache:
+    key:
+      files: [yarn.lock]
+    paths: [.yarn/unplugged]
+  script:
+    - corepack enable
+    - yarn install --immutable
+    - yarn npm audit --all --recursive --severity $[[ inputs.severity ]]
