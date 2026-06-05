@@ -1,0 +1,30 @@
+# validate-node — Yarn(Berry/PnP) 프로젝트 lint + 타입체크
+# 사용: include component .../validate-node@<ref>
+spec:
+  inputs:
+    stage:
+      default: validate
+    node_image:
+      default: node:22-bookworm-slim   # glibc (rolldown 등 네이티브 바인딩 호환)
+    install_cmd:
+      default: yarn install --immutable
+    lint_cmd:
+      default: yarn lint
+    typecheck_cmd:
+      default: yarn tsc -b
+---
+validate:
+  stage: $[[ inputs.stage ]]
+  image: $[[ inputs.node_image ]]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  cache:
+    key:
+      files: [yarn.lock]
+    paths: [.yarn/unplugged]            # PnP 네이티브 unplugged 재사용(가속)
+  script:
+    - corepack enable
+    - $[[ inputs.install_cmd ]]
+    - $[[ inputs.lint_cmd ]]
+    - $[[ inputs.typecheck_cmd ]]

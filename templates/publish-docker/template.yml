@@ -1,0 +1,35 @@
+# publish-docker — image.tar 을 레지스트리에 push (:sha + :main) 후 불변 digest 출력
+#   build/scan(게이트) 통과 후 main 에서만 실행. digest 는 dotenv(IMAGE_DIGEST)로 sign 에 전달.
+spec:
+  inputs:
+    stage:
+      default: publish
+    image:
+      default: $CI_REGISTRY_IMAGE
+    image_tar:
+      default: image.tar
+    moving_tag:
+      default: main                      # :sha(불변) 외에 추가로 붙일 이동 태그
+---
+publish:
+  stage: $[[ inputs.stage ]]
+  image: docker:27
+  services: [docker:27-dind]
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker load -i "$[[ inputs.image_tar ]]"
+    - docker push "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA"
+    - docker tag "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA" "$[[ inputs.image ]]:$[[ inputs.moving_tag ]]"
+    - docker push "$[[ inputs.image ]]:$[[ inputs.moving_tag ]]"
+    - DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA" | cut -d@ -f2)
+    - echo "IMAGE_DIGEST=$DIGEST" | tee build.env
+  artifacts:
+    reports:
+      dotenv: build.env

@@ -1,0 +1,45 @@
+# sign — cosign keyless 서명 + 내장 SBOM(CycloneDX) attestation (FE/BE 공통)
+#   build 가 내보낸 IMAGE_DIGEST(dotenv) 기준으로 서명.
+#   SBOM 은 GitLab 내장 Dependency-Scanning 이 만든 gl-sbom-*.cdx.json 을 attest (syft 불필요).
+#   keyless: GitLab OIDC(id_token) → Fulcio 인증서 + Rekor 투명성로그.
+spec:
+  inputs:
+    stage:
+      default: sign
+    image:
+      default: $CI_REGISTRY_IMAGE
+    cosign_version:
+      default: v2.4.1
+---
+sign:
+  stage: $[[ inputs.stage ]]
+  image: alpine:3.20
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  needs:
+    - job: build              # IMAGE_DIGEST(dotenv) 수신
+      artifacts: true
+    - job: dependency_scanning  # 내장 SBOM(gl-sbom-*.cdx.json). 없으면 attest 스킵
+      artifacts: true
+      optional: true
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  script:
+    - apk add --no-cache curl
+    - curl -sSfL "https://github.com/sigstore/cosign/releases/download/$[[ inputs.cosign_version ]]/cosign-linux-amd64" -o /usr/local/bin/cosign && chmod +x /usr/local/bin/cosign
+    # 레지스트리 인증(cosign 이 ~/.docker/config.json 사용)
+    - mkdir -p ~/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"auth\":\"$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')\"}}}" > ~/.docker/config.json
+    - test -n "$IMAGE_DIGEST" || { echo "IMAGE_DIGEST 없음 — build 선행 필요"; exit 1; }
+    # 서명
+    - cosign sign --yes "$[[ inputs.image ]]@$IMAGE_DIGEST"
+    # 내장 SBOM attestation (있으면)
+    - |
+      SBOM=$(ls gl-sbom-*.cdx.json 2>/dev/null | head -1 || true)
+      if [ -n "$SBOM" ]; then
+        echo "attest SBOM: $SBOM"
+        cosign attest --yes --predicate "$SBOM" --type cyclonedx "$[[ inputs.image ]]@$IMAGE_DIGEST"
+      else
+        echo "내장 SBOM(gl-sbom-*.cdx.json) 없음 — Dependency-Scanning 잡/버전 확인. attest 스킵."
+      fi

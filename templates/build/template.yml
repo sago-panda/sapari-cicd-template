@@ -1,0 +1,42 @@
+# build — Dockerfile(BuildKit) 빌드 + 레지스트리 push(:sha,:main) + 불변 digest 출력
+#   스캔은 내장 Container-Scanning(레지스트리 이미지 대상)이 담당하므로 여기서 바로 push 한다.
+#   digest → dotenv(IMAGE_DIGEST) 로 sign/bump 에 전달. (dind/privileged 러너 필요)
+spec:
+  inputs:
+    stage:
+      default: build
+    image:
+      default: $CI_REGISTRY_IMAGE        # = registry.gitlab.com/<group>/<project>
+    context:
+      default: .
+    dockerfile:
+      default: Dockerfile
+    moving_tag:
+      default: main
+---
+build:
+  stage: $[[ inputs.stage ]]
+  image: docker:27
+  services: [docker:27-dind]
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker buildx create --use --name b >/dev/null
+    - >
+      docker buildx build --push
+      --tag "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA"
+      --tag "$[[ inputs.image ]]:$[[ inputs.moving_tag ]]"
+      --file "$[[ inputs.dockerfile ]]"
+      --progress plain
+      "$[[ inputs.context ]]"
+    - DIGEST=$(docker buildx imagetools inspect "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA" --format '{{.Manifest.Digest}}')
+    - echo "IMAGE_DIGEST=$DIGEST" | tee build.env
+  artifacts:
+    reports:
+      dotenv: build.env

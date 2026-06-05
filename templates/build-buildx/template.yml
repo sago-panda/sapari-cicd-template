@@ -1,0 +1,39 @@
+# build-buildx — Dockerfile(BuildKit)로 빌드 후 image.tar 아티팩트 생성 (FE 등 정적/일반)
+# scan 단계가 이 tar를 검사 → 통과해야 publish. (dind/privileged 러너 필요)
+spec:
+  inputs:
+    stage:
+      default: build
+    image:
+      default: $CI_REGISTRY_IMAGE       # = registry.gitlab.com/<group>/<project>
+    context:
+      default: .
+    dockerfile:
+      default: Dockerfile
+    image_tar:
+      default: image.tar
+---
+build:
+  stage: $[[ inputs.stage ]]
+  image: docker:27
+  services: [docker:27-dind]
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - docker buildx create --use --name b >/dev/null
+    - >
+      docker buildx build
+      --tag "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA"
+      --file "$[[ inputs.dockerfile ]]"
+      --output type=docker,dest="$[[ inputs.image_tar ]]"
+      --progress plain
+      "$[[ inputs.context ]]"
+  artifacts:
+    paths: ["$[[ inputs.image_tar ]]"]
+    expire_in: 1 day

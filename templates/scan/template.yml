@@ -1,0 +1,54 @@
+# scan — Trivy 게이트 (FE/BE 공통)
+#   scan:image  : 빌드된 image.tar 의 취약점+시크릿 (HIGH/CRITICAL → 실패)
+#   scan:repo   : 레포 의존성/시크릿 + Dockerfile/매니페스트 미스컨피그
+# build 단계의 image.tar 아티팩트가 이 stage 로 자동 전달됨(이전 stage 산출물).
+spec:
+  inputs:
+    stage:
+      default: scan
+    trivy_image:
+      default: aquasec/trivy:0.58.1
+    image_tar:
+      default: image.tar
+    severity:
+      default: HIGH,CRITICAL
+---
+scan:image:
+  stage: $[[ inputs.stage ]]
+  image:
+    name: $[[ inputs.trivy_image ]]
+    entrypoint: [""]
+  variables:
+    TRIVY_NO_PROGRESS: "true"
+    TRIVY_CACHE_DIR: .trivycache
+  cache:
+    key: trivy-db
+    paths: [.trivycache]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - trivy image --input "$[[ inputs.image_tar ]]" --scanners vuln,secret --severity "$[[ inputs.severity ]]" --ignore-unfixed --exit-code 1
+    - trivy image --input "$[[ inputs.image_tar ]]" --scanners vuln,secret --format json --output trivy-image.json
+  artifacts:
+    paths: [trivy-image.json]
+    when: always
+
+scan:repo:
+  stage: $[[ inputs.stage ]]
+  image:
+    name: $[[ inputs.trivy_image ]]
+    entrypoint: [""]
+  dependencies: []                       # image.tar 불필요(소스만 검사)
+  variables:
+    TRIVY_NO_PROGRESS: "true"
+    TRIVY_CACHE_DIR: .trivycache
+  cache:
+    key: trivy-db
+    paths: [.trivycache]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  script:
+    - trivy fs --scanners vuln,secret --severity "$[[ inputs.severity ]]" --ignore-unfixed --exit-code 1 .
+    - trivy config --severity "$[[ inputs.severity ]]" --exit-code 1 .

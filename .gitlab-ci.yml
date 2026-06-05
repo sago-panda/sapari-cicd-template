@@ -1,0 +1,24 @@
+# sapari-cicd-template 자체 CI — 컴포넌트 YAML 검증 + 태그 시 CI/CD Catalog 릴리스
+stages: [test, release]
+
+# 컴포넌트 template.yml 들이 valid YAML 인지 가벼운 검증
+lint-components:
+  stage: test
+  image: mikefarah/yq:4
+  script:
+    - for f in templates/*/template.yml; do echo "check $f"; yq e 'true' "$f" >/dev/null; done
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+# 태그(semver) 푸시 시 CI/CD Catalog 에 컴포넌트 릴리스 게시
+create-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+$/'
+  script:
+    - echo "Releasing $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    description: "sapari-cicd-template $CI_COMMIT_TAG"
