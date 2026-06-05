@@ -1,6 +1,8 @@
-# build — Dockerfile(BuildKit) 빌드 + 레지스트리 push(:sha,:main) + 불변 digest 출력
-#   스캔은 내장 Container-Scanning(레지스트리 이미지 대상)이 담당하므로 여기서 바로 push 한다.
-#   digest → dotenv(IMAGE_DIGEST) 로 sign/bump 에 전달. (dind/privileged 러너 필요)
+# build — Dockerfile 빌드 + 레지스트리 push(:sha,:main) + 불변 digest 출력
+#   스캔은 내장 Container-Scanning(레지스트리 이미지 대상)이 담당하므로 여기서 바로 push.
+#   digest → dotenv(IMAGE_DIGEST) 로 sign/bump 에 전달. (dind 러너 필요)
+#   ※ buildx 미사용: 우리 Dockerfile 은 BuildKit 캐시마운트를 안 쓰고, dind+TLS 에서
+#     `docker buildx create` 가 자주 실패함 → 일반 docker build(BuildKit 기본 on)로 충분.
 spec:
   inputs:
     stage:
@@ -23,19 +25,20 @@ build:
     DOCKER_HOST: tcp://docker:2376
     DOCKER_TLS_VERIFY: "1"
     DOCKER_CERT_PATH: "/certs/client"
+    DOCKER_BUILDKIT: "1"               # # syntax 디렉티브 동작 보장
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - docker buildx create --use --name b >/dev/null
     - >
-      docker buildx build --push
+      docker build
       --tag "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA"
       --tag "$[[ inputs.image ]]:$[[ inputs.moving_tag ]]"
       --file "$[[ inputs.dockerfile ]]"
-      --progress plain
       "$[[ inputs.context ]]"
-    - DIGEST=$(docker buildx imagetools inspect "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA" --format '{{.Manifest.Digest}}')
+    - docker push "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA"
+    - docker push "$[[ inputs.image ]]:$[[ inputs.moving_tag ]]"
+    - DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$[[ inputs.image ]]:$CI_COMMIT_SHORT_SHA" | cut -d@ -f2)
     - echo "IMAGE_DIGEST=$DIGEST" | tee build.env
   artifacts:
     reports:
