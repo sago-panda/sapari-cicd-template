@@ -13,7 +13,13 @@ spec:
       default: gitlab.com/sagopanda/sapari-helm-manifest.git
     manifest_file:                       # 대상 매니페스트 경로 (필수)
     container_name:
-      default: web                       # 이미지 갱신할 컨테이너 이름
+      default: web                       # (Deployment 모드) 이미지 갱신할 컨테이너 이름
+    update_expr:
+      # 갱신 방식(yq 식). 기본 = plain Deployment. Helm values 면 override:
+      #   '.image.digest = strenv(IMAGE_DIGEST)'   (repository 는 values 에 고정)
+      #   또는 '.image = strenv(NEWIMAGE)'          (values 가 image 단일 풀ref 일 때)
+      # 사용 가능 env: NEWIMAGE(repo@digest), IMAGE(repo), IMAGE_DIGEST(sha256:..), CNAME
+      default: '(.spec.template.spec.containers[] | select(.name == strenv(CNAME)) | .image) = strenv(NEWIMAGE)'
     target_branch:
       default: main
 ---
@@ -31,13 +37,15 @@ bump:
   script:
     - apk add --no-cache git yq
     - test -n "$IMAGE_DIGEST" || { echo "IMAGE_DIGEST 없음 — build 선행 필요"; exit 1; }
+    - test -n "$MANIFEST_WRITE_TOKEN" || { echo "MANIFEST_WRITE_TOKEN 미설정 — CI/CD Variables 확인 (write_repository 토큰)"; exit 1; }
     - git config --global user.email "ci-bot@sagopanda.local"
     - git config --global user.name  "$CI_PROJECT_NAME CI"
     - git clone --depth 1 "https://oauth2:${MANIFEST_WRITE_TOKEN}@$[[ inputs.manifest_repo ]]" manifest
     - cd manifest
-    - export NEWIMAGE="$[[ inputs.image ]]@${IMAGE_DIGEST}"   # 불변 digest 핀
+    - export NEWIMAGE="$[[ inputs.image ]]@${IMAGE_DIGEST}"   # 불변 digest 핀 (repo@sha256:..)
+    - export IMAGE="$[[ inputs.image ]]"
     - export CNAME="$[[ inputs.container_name ]]"
-    - yq -i '(.spec.template.spec.containers[] | select(.name == strenv(CNAME)) | .image) = strenv(NEWIMAGE)' "$[[ inputs.manifest_file ]]"
+    - yq -i "$[[ inputs.update_expr ]]" "$[[ inputs.manifest_file ]]"
     - git add "$[[ inputs.manifest_file ]]"
     - |
       if git diff --cached --quiet; then
