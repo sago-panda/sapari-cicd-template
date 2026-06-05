@@ -43,5 +43,5 @@ bump:
       if git diff --cached --quiet; then
         echo "이미지 변경 없음 — bump 스킵"; exit 0
       fi
-    - git commit -m "chore($CI_PROJECT_NAME): bump image to ${CI_COMMIT_SHORT_SHA} [skip ci]"
+    - 'git commit -m "chore($CI_PROJECT_NAME): bump image to ${CI_COMMIT_SHORT_SHA} [skip ci]"'
     - git push origin "HEAD:$[[ inputs.target_branch ]]"
