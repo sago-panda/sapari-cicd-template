@@ -1,0 +1,38 @@
+# promote — verify 를 통과한 GitOps 상태만 배포 브랜치(release)로 승격 (GitOps repo 전용)
+#   파이프라인 마지막 stage 에서 "이 파이프라인의 커밋($CI_COMMIT_SHA)"을 release 로 ff-push 한다.
+#   ArgoCD 는 release 를 sync 하므로, verify(서명 검증)가 빨간 커밋은 배포 대상이 아예 못 된다
+#   → main 직접 push 경로에서도 verify 가 탐지가 아닌 "차단" 통제가 됨.
+#
+#   설계 메모
+#     - $CI_COMMIT_SHA 를 push: 파이프라인이 검증한 "바로 그 상태"만 승격 (이후 main 이 더 진행됐어도 무관.
+#       verify 는 diff 가 아니라 components/ 전체 "상태" 검증이라 커밋 건너뜀 승격도 안전)
+#     - --force 없음: release 가 앞서 있으면 non-ff 거부 = 더 새 커밋이 이미 승격된 것 → 실패해도 정상
+#     - 한계: 같은 repo CI 라 main 쓰기 권한자가 파이프라인을 변조하면 우회 가능 —
+#       release 브랜치 보호(push 허용 = 이 토큰 주체만) + 클러스터 측 Kyverno 가 최종 방어선
+#
+#   필요 변수: PROMOTE_TOKEN — 이 repo 자신의 write_repository 토큰 (Project Access Token).
+#     ★ Masked + Protected + environment scope = `release` 로 설정 (이 잡만 environment: release 선언)
+spec:
+  inputs:
+    stage:
+      default: promote
+    release_branch:
+      default: release
+---
+promote:
+  stage: $[[ inputs.stage ]]
+  image: alpine:3.22
+  interruptible: true   # 더 새 커밋의 파이프라인이 시작되면 자동 취소 — 구 커밋 promote 의 non-ff 거부 소음 방지
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'   # main 파이프라인에서만 (이전 stage 전부 성공해야 도달)
+  environment:
+    name: release
+    action: prepare       # 배포 기록 없이 environment 연결만 — PROMOTE_TOKEN 을 이 잡에만 스코핑
+  variables:
+    GIT_STRATEGY: fetch   # 로컬에 $CI_COMMIT_SHA 가 있어야 push 가능 (기본 체크아웃 사용)
+  script:
+    - apk add --no-cache git
+    - test -n "$PROMOTE_TOKEN" || { echo "PROMOTE_TOKEN 미설정 — CI/CD Variables 확인 (이 repo write_repository, env scope=release)"; exit 1; }
+    # 검증된 커밋만 release 로 ff-push (브랜치 없으면 생성, non-ff 면 거부됨)
+    - git push "https://oauth2:${PROMOTE_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "${CI_COMMIT_SHA}:refs/heads/$[[ inputs.release_branch ]]"
+    - echo "promote 완료 → $[[ inputs.release_branch ]] = $CI_COMMIT_SHA (ArgoCD 가 이 브랜치를 sync)"

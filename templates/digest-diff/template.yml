@@ -1,0 +1,93 @@
+# digest-diff — Dockerfile 베이스 digest 변경 MR 에 "왜"를 채우는 잡 (FE/BE 공통, 정보성)
+#   Renovate(또는 사람)가 FROM tag@sha256 을 갱신한 MR 에서, target 브랜치의 old digest 와
+#   MR 의 new digest 를 trivy 로 각각 스캔해 CVE diff(고쳐진/새로 생긴)를 산출한다.
+#   결과 게시 경로:
+#     1) 잡 로그 + MR 위젯 아티팩트(artifacts:expose_as)  — 토큰 불필요, 기본
+#     2) MR 코멘트 — 선택. CI 변수 MR_COMMENT_TOKEN(해당 repo Project Access Token,
+#        role Reporter + scope api) 이 있으면 자동 게시
+#   allow_failure: 정보성 잡이므로 실패해도 MR 을 막지 않는다 (게이트는 audit/scan 의 몫).
+spec:
+  inputs:
+    stage:
+      default: validate
+    dockerfile:
+      default: Dockerfile
+    severity_detail:
+      default: HIGH,CRITICAL              # 본문에 ID 까지 나열할 심각도 (나머지는 건수만)
+    trivy_version:
+      default: 0.71.0                     # sign/scan 컴포넌트와 버전 통일
+    trivy_sha256:
+      # trivy_<ver>_Linux-64bit.tar.gz 의 공식 sha256 — 버전 올릴 때 같이 갱신(Renovate 자동)
+      default: 30a3d22b23f88c233f1658f562fb477cae3b3e8b4761109d515b7698daf85814
+---
+digest-diff:
+  stage: $[[ inputs.stage ]]
+  image: alpine:3.22
+  allow_failure: true
+  rules:
+    # Dockerfile 이 바뀐 MR 에서만 (Renovate 브랜치 + 수동 digest 변경 모두 커버)
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        paths:
+          - $[[ inputs.dockerfile ]]
+  script:
+    - apk add --no-cache curl git jq
+    # trivy 설치 — sha256 핀
+    - curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v$[[ inputs.trivy_version ]]/trivy_$[[ inputs.trivy_version ]]_Linux-64bit.tar.gz" -o /tmp/trivy.tgz
+    - echo "$[[ inputs.trivy_sha256 ]]  /tmp/trivy.tgz" | sha256sum -c -
+    - tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy
+    # target 브랜치의 Dockerfile 확보 (FETCH_HEAD = 방금 fetch 한 커밋 — 러너의 refspec 구성과 무관하게 안전)
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
+    - git show "FETCH_HEAD:$[[ inputs.dockerfile ]]" > /tmp/Dockerfile.old || echo -n > /tmp/Dockerfile.old
+    # 베이스별 old↔new digest 비교 → trivy CVE diff → cve-diff.md
+    - |
+      extract() { grep -oE 'FROM +[^ ]+@sha256:[0-9a-f]{64}' "$1" | awk '{print $2}'; }
+      vulns() {   # $1=image ref → "CVE-ID SEVERITY" 정렬 목록
+        trivy image --scanners vuln --format json --output /tmp/scan.json "$1" >/dev/null 2>&1 \
+          && jq -r '[.Results[]?.Vulnerabilities[]? | "\(.VulnerabilityID) \(.Severity)"] | unique | .[]' /tmp/scan.json | sort -u
+      }
+      R=cve-diff.md
+      echo "## 베이스 이미지 digest 변경 — CVE diff (trivy v$[[ inputs.trivy_version ]])" > "$R"
+      changed=0
+      for ref in $(extract "$[[ inputs.dockerfile ]]"); do
+        name=${ref%%@*}
+        old=$(extract /tmp/Dockerfile.old | grep -F "$name@" | head -1 || true)
+        [ "$old" = "$ref" ] && continue
+        changed=$((changed+1))
+        echo "" >> "$R"; echo "### \`$name\`" >> "$R"
+        if [ -z "$old" ]; then echo "- 신규 digest 핀 (비교 대상 없음)" >> "$R"; continue; fi
+        echo "- old: \`${old##*@}\`" >> "$R"
+        echo "- new: \`${ref##*@}\`" >> "$R"
+        vulns "$old" > /tmp/old.txt || { echo "- ⚠️ old 이미지 스캔 실패 — diff 생략" >> "$R"; continue; }
+        vulns "$ref" > /tmp/new.txt || { echo "- ⚠️ new 이미지 스캔 실패 — diff 생략" >> "$R"; continue; }
+        comm -23 /tmp/old.txt /tmp/new.txt > /tmp/fixed.txt     # old 에만 = 고쳐짐
+        comm -13 /tmp/old.txt /tmp/new.txt > /tmp/introduced.txt # new 에만 = 새로 생김
+        nf=$(wc -l < /tmp/fixed.txt); ni=$(wc -l < /tmp/introduced.txt)
+        echo "- **고쳐진 CVE: ${nf}건 / 새로 생긴 CVE: ${ni}건**" >> "$R"
+        SEV=$(echo "$[[ inputs.severity_detail ]]" | tr ',' '|')   # HIGH,CRITICAL → HIGH|CRITICAL (POSIX)
+        for kind in fixed introduced; do
+          label=$([ "$kind" = fixed ] && echo "✅ 고쳐짐" || echo "🆕 새로 생김")
+          hits=$(grep -E " (${SEV})$" /tmp/$kind.txt || true)
+          if [ -n "$hits" ]; then
+            echo "" >> "$R"; echo "$label (${SEV}):" >> "$R"
+            echo "$hits" | head -30 | awk '{printf "- `%s` (%s)\n", $1, $2}' >> "$R"
+          fi
+        done
+        echo "" >> "$R"; echo "<sub>전체 목록은 잡 아티팩트 참고. 건수에는 모든 심각도 포함.</sub>" >> "$R"
+      done
+      [ "$changed" -gt 0 ] || echo "(digest 변경 없음 — Dockerfile 의 다른 부분만 수정됨)" >> "$R"
+      echo "──────── cve-diff.md ────────"; cat "$R"
+    # MR 코멘트 게시 (MR_COMMENT_TOKEN 있을 때만 — 없으면 위젯 아티팩트로 충분)
+    - |
+      if [ -n "${MR_COMMENT_TOKEN:-}" ]; then
+        curl -sSf -X POST -H "PRIVATE-TOKEN: $MR_COMMENT_TOKEN" \
+          --data-urlencode "body@cve-diff.md" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes" >/dev/null \
+          && echo "MR 코멘트 게시 완료" || echo "MR 코멘트 게시 실패(토큰 권한 확인) — 아티팩트로 확인"
+      else
+        echo "MR_COMMENT_TOKEN 미설정 — MR 위젯 아티팩트로 확인"
+      fi
+  artifacts:
+    paths: [cve-diff.md]
+    expose_as: 'CVE diff'                 # MR 위젯에 링크로 노출
+    expire_in: 2 weeks
