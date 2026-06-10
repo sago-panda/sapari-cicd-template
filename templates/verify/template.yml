@@ -1,0 +1,107 @@
+# verify — manifest 의 이미지가 "공식 파이프라인이 서명한 이미지"인지 cosign keyless 로 검증 (FE/BE 공통)
+#
+# 실행 위치
+#   ★ 다른 컴포넌트와 달리 앱 레포가 아니라 GitOps repo(sapari-helm-manifest) 파이프라인에서 실행.
+#
+# 동작 — 컨벤션 기반 자동 발견 (새 앱 추가 시 include 수정 불필요)
+#   1) manifest_glob(공백 구분 다중 glob)의 모든 yaml 에서 "문자열 image 필드"를 재귀 추출
+#      — containers 외에 initContainers/CronJob/임의 워크로드의 image 도 커버
+#   2) "이미지 경로 = 프로젝트 경로" 컨벤션으로 기대 서명 신원을 유도
+#        이미지   $CI_REGISTRY/<ns>/<repo>@sha256:...
+#        신원     $CI_SERVER_URL/<ns>/<repo>//.gitlab-ci.yml@refs/heads/main
+#   3) cosign verify = "이미지를 소유한 프로젝트의 main 파이프라인이 서명했는가"
+#
+# fail-closed 규칙 (전부 파이프라인 실패)
+#   - 자사 이미지가 digest(@sha256:) 미고정(태그 참조)        → 검증 후 태그 재지정(TOCTOU) 차단
+#   - yq 추출 실패(yaml 파손 등)                              → 조용한 스킵 금지
+#   - 서명 없음 / 신원 불일치                                  → CI 우회 push·임의 digest 차단
+#   - 검증된 자사 이미지 0건                                   → glob/네임스페이스 오설정 가드
+#   (자사 PREFIX 가 아닌 외부 이미지는 skip — 외부 차트 이미지는 이 검증의 범위 밖)
+#
+# 신뢰 단위 주의
+#   신원을 이미지 경로에서 유도하므로 보장 범위는 "<ns> 네임스페이스의 각 프로젝트가 자기 이미지를
+#   서명했다"까지다. 즉 frontend 매니페스트에 (서명된) 타 프로젝트 이미지를 넣는 것은 통과한다
+#   — 네임스페이스 내 전 repo 가 동일 신뢰 등급이라는 전제. 컴포넌트↔프로젝트 결속이 필요하면
+#   Kyverno 정책에서 네임스페이스/디렉터리별 imageReferences 매핑으로 강제할 것.
+#
+# 전제 (이미지 소유 앱 repo 마다 1회)
+#   앱 repo Settings → CI/CD → Job token permissions 에 GitOps repo 허용.
+#   이 잡은 GitOps repo 의 CI_JOB_TOKEN 으로 앱 repo "소유" registry 의 서명을 읽는다
+#   (inbound allowlist — 자원 주인이 접근을 허용해 주는 방향이지, 토큰을 넘겨받는 게 아님).
+#
+# 차단력
+#   promote 컴포넌트와 함께 쓰면 verify 통과 커밋만 release(=ArgoCD sync 대상)로 승격되어
+#   main 직접 push 경로에서도 "차단형" 통제가 된다.
+#   한계: 같은 repo CI 라서 main push 권한자가 파이프라인을 변조하면 우회 가능
+#   → main/release 브랜치 보호 + 클러스터 측 Kyverno admission 이 최종 방어선.
+spec:
+  inputs:
+    stage:
+      default: test
+    manifest_glob:
+      # 공백 구분 다중 glob — ArgoCD 가 배포하는 모든 매니페스트를 커버해야 함 (deployment.yaml 한정 금지)
+      default: components/*/*.yaml components/*/*/*.yaml
+    registry_namespace:
+      default: sagopanda                      # 이 네임스페이스 이미지만 검증 (외부 이미지는 skip)
+    image_expr:
+      # 모든 깊이의 image 필드 중 문자열만 (Helm values 의 image: {repository,tag} map 은 제외)
+      default: '.. | .image? | select(tag == "!!str")'
+    signing_ref:
+      default: refs/heads/main                # 서명을 인정할 ref (sign 컴포넌트는 main 에서만 돈다)
+    oidc_issuer:
+      default: $CI_SERVER_URL                 # GitLab SaaS = https://gitlab.com
+    cosign_version:
+      default: v3.0.6
+    cosign_sha256:
+      # cosign-linux-amd64 의 공식 sha256 (릴리스 cosign_checksums.txt) — 버전 올릴 때 같이 갱신
+      default: c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+---
+verify:
+  stage: $[[ inputs.stage ]]
+  image: alpine:3.22
+  interruptible: true   # 더 새 커밋의 파이프라인이 시작되면 자동 취소 (최신 상태만 검증·승격하면 됨)
+  rules:
+    # changes 필터 없이 항상 실행 — "어떤 파일 변경이 이미지에 닿는가"를 룰이 추측하게 두면
+    # 새 파일/경로가 검증을 그냥 지나친다 (저비용 잡이라 매 파이프라인 실행이 안전)
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - apk add --no-cache curl yq
+    # cosign 설치 — sha256 핀으로 다운로드 무결성 검증 후에만 실행권한 부여
+    - curl -sSfL "https://github.com/sigstore/cosign/releases/download/$[[ inputs.cosign_version ]]/cosign-linux-amd64" -o /usr/local/bin/cosign
+    - echo "$[[ inputs.cosign_sha256 ]]  /usr/local/bin/cosign" | sha256sum -c -
+    - chmod +x /usr/local/bin/cosign
+    # 레지스트리 인증(서명 아티팩트 fetch 용 — cosign 이 ~/.docker/config.json 사용)
+    - mkdir -p ~/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"auth\":\"$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')\"}}}" > ~/.docker/config.json
+    # 이미지 추출 → 신원 유도 → keyless 검증 (위 헤더의 "동작" 1→2→3, fail-closed 규칙 적용)
+    - |
+      PREFIX="$CI_REGISTRY/$[[ inputs.registry_namespace ]]/"
+      ok=0; fail=0
+      for f in $[[ inputs.manifest_glob ]]; do
+        [ -f "$f" ] || continue
+        IMGS=$(yq e '$[[ inputs.image_expr ]]' "$f") || { echo "FAIL — yq 추출 실패(yaml 파손?): $f"; exit 1; }
+        for IMG in $IMGS; do
+          case "$IMG" in
+            "$PREFIX"*) : ;;
+            *) continue ;;                    # 자사 이미지 아님 — 검증 범위 밖
+          esac
+          echo "verify: $IMG ($f)"
+          case "$IMG" in
+            *@sha256:*) : ;;
+            *) echo "  ↳ FAIL — digest 미고정(태그 참조). bump 는 항상 @sha256 을 쓴다 — 임의 수정 의심"
+               fail=$((fail+1)); continue ;;
+          esac
+          PROJ=${IMG#"$CI_REGISTRY"/}; PROJ=${PROJ%%@*}
+          IDENTITY="$CI_SERVER_URL/$PROJ//.gitlab-ci.yml@$[[ inputs.signing_ref ]]"
+          echo "  ↳ 기대 신원: $IDENTITY"
+          if cosign verify --certificate-oidc-issuer="$[[ inputs.oidc_issuer ]]" --certificate-identity="$IDENTITY" "$IMG" >/dev/null; then
+            echo "  ↳ OK"; ok=$((ok+1))
+          else
+            echo "  ↳ FAIL — 서명 없음 / 신원 불일치 (CI 우회 push 또는 임의 digest 의심)"; fail=$((fail+1))
+          fi
+        done
+      done
+      echo "── 검증 결과: 통과 $ok / 실패 $fail"
+      [ "$fail" -eq 0 ] || exit 1
+      [ "$ok" -gt 0 ] || { echo "검증된 자사 이미지 0건 — manifest_glob/registry_namespace/image_expr 확인"; exit 1; }
