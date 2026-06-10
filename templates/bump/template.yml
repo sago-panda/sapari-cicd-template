@@ -1,8 +1,12 @@
 # bump — GitOps write-back: sapari-helm-manifest 의 이미지를 불변 digest 로 갱신 (FE/BE 공통)
 #   build 가 내보낸 dotenv IMAGE_DIGEST(=sha256:...)를 받아 image: <repo>@sha256:... 로 고정.
 #   digest = cosign 이 서명한 바로 그 이미지 → 재현성+공급망 보안(태그 재사용 불일치 차단).
-#   ArgoCD가 그 커밋을 보고 배포한다(CI는 배포 안 함).
-#   필요 변수: MANIFEST_WRITE_TOKEN (대상 repo write_repository 권한, Masked CI 변수)
+#   그 커밋이 대상 repo 파이프라인(verify→promote)을 통과해 release 로 승격되면 ArgoCD 가 배포한다
+#   (CI 는 배포 안 함 — ArgoCD 의 sync 대상은 main 이 아니라 release).
+#   필요 변수: MANIFEST_WRITE_TOKEN — 대상 repo write_repository 토큰.
+#     ★ Masked + Protected + environment scope = `gitops` 로 설정할 것.
+#       이 잡만 environment: gitops 를 선언하므로 토큰이 이 잡에만 주입된다
+#       (yarn install 등 의존성 코드가 실행되는 validate/audit 잡에 노출 방지).
 spec:
   inputs:
     stage:
@@ -28,6 +32,9 @@ bump:
   image: alpine:3.22
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
+  environment:
+    name: gitops
+    action: prepare       # 배포 기록 없이 environment 연결만 — MANIFEST_WRITE_TOKEN 을 이 잡에만 스코핑
   needs:
     - job: build          # IMAGE_DIGEST(dotenv) 수신
       artifacts: true
@@ -36,11 +43,13 @@ bump:
     GIT_STRATEGY: none                   # 앱 repo 체크아웃 불필요(대상 repo만 clone)
   script:
     - apk add --no-cache git yq
-    - test -n "$IMAGE_DIGEST" || { echo "IMAGE_DIGEST 없음 — build 선행 필요"; exit 1; }
+    # dotenv 로 받은 digest 형식 검증 (빈 값/오염이 GitOps repo 에 커밋되는 것 차단)
+    - echo "$IMAGE_DIGEST" | grep -qE '^sha256:[0-9a-f]{64}$' || { echo "IMAGE_DIGEST 형식 오류('$IMAGE_DIGEST') — build 선행/출력 확인"; exit 1; }
     - test -n "$MANIFEST_WRITE_TOKEN" || { echo "MANIFEST_WRITE_TOKEN 미설정 — CI/CD Variables 확인 (write_repository 토큰)"; exit 1; }
     - git config --global user.email "ci-bot@sagopanda.local"
     - git config --global user.name  "$CI_PROJECT_NAME CI"
-    - git clone --depth 1 "https://oauth2:${MANIFEST_WRITE_TOKEN}@$[[ inputs.manifest_repo ]]" manifest
+    # --branch 명시: target_branch 가 기본 브랜치가 아니어도 그 브랜치 기준으로 갱신되도록
+    - git clone --depth 1 --branch "$[[ inputs.target_branch ]]" "https://oauth2:${MANIFEST_WRITE_TOKEN}@$[[ inputs.manifest_repo ]]" manifest
     - cd manifest
     - export NEWIMAGE="$[[ inputs.image ]]@${IMAGE_DIGEST}"   # 불변 digest 핀 (repo@sha256:..)
     - export IMAGE="$[[ inputs.image ]]"
@@ -51,5 +60,6 @@ bump:
       if git diff --cached --quiet; then
         echo "이미지 변경 없음 — bump 스킵"; exit 0
       fi
-    - 'git commit -m "chore($CI_PROJECT_NAME): bump image to ${CI_COMMIT_SHORT_SHA} [skip ci]"'
+    # [skip ci] 금지 — write-back 커밋이 대상 repo 의 verify(서명 검증) 파이프라인을 트리거해야 함
+    - 'git commit -m "chore($CI_PROJECT_NAME): bump image to ${CI_COMMIT_SHORT_SHA}"'
     - git push origin "HEAD:$[[ inputs.target_branch ]]"
