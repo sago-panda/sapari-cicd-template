@@ -18,6 +18,17 @@
       ]
     },
     {
+      "description": "CI 잡 이미지 비-major 는 MR 1개로 그룹 — 개별 merge 부담 제거",
+      "matchManagers": ["gitlabci"],
+      "matchUpdateTypes": ["digest", "pin", "patch", "minor"],
+      "groupName": "CI 이미지 (non-major)"
+    },
+    {
+      "description": "major(docker v29 등)는 Dependency Dashboard 체크박스 승인 후에만 MR 생성",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
       "description": "cosign/trivy 버전 핀 — 버전 MR 에 sha256 핀을 공식 checksums.txt 로 자동 동기화(postUpgradeTasks)",
       "matchDepNames": ["sigstore/cosign", "aquasecurity/trivy"],
       "postUpgradeTasks": {
