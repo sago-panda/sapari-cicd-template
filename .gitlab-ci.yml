@@ -1,14 +1,21 @@
 # sapari-cicd-template 자체 CI — 컴포넌트 YAML 검증 + 태그 시 CI/CD Catalog 릴리스
 stages: [test, release]
 
-# 컴포넌트 template.yml 들이 valid YAML 인지 가벼운 검증
+# 컴포넌트 template.yml 들이 valid YAML + spec.inputs 보유인지 가벼운 검증
 lint-components:
   stage: test
   image:
     name: mikefarah/yq:4
     entrypoint: [""]   # ENTRYPOINT(yq) 비워서 GitLab 이 sh 로 script 실행하게 함
   script:
-    - for f in templates/*/template.yml; do echo "check $f"; yq e 'true' "$f" >/dev/null; done
+    # ★ 루프 안에서 즉시 exit — for 루프는 마지막 명령의 종료코드만 남아 중간 실패가 묻힌다
+    - |
+      for f in templates/*/template.yml; do
+        echo "check $f"
+        yq e 'true' "$f" >/dev/null || { echo "INVALID YAML: $f"; exit 1; }
+        yq e -e 'select(document_index == 0) | .spec.inputs' "$f" >/dev/null \
+          || { echo "spec.inputs 없음(컴포넌트 형식 위반): $f"; exit 1; }
+      done
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH'

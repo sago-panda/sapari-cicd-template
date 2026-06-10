@@ -1,0 +1,52 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Asia/Seoul",
+  "labels": ["renovate"],
+  "enabledManagers": ["gitlabci", "custom.regex"],
+  "gitlabci": {
+    "fileMatch": ["^\\.gitlab-ci\\.yml$", "^templates/.+/template\\.yml$"]
+  },
+  "pinDigests": true,
+  "packageRules": [
+    {
+      "description": "잡 베이스 이미지(alpine/docker/node 등) — digest 핀 + 갱신. digest 만 바뀌는 업데이트는 '태그 재빌드(보통 보안패치)' 사유를 본문에 명시",
+      "matchManagers": ["gitlabci"],
+      "matchUpdateTypes": ["digest", "pin", "patch", "minor"],
+      "prBodyNotes": [
+        "#### 왜 열렸나\n- `digest`/`pin`: 태그는 그대로지만 베이스가 재빌드되어 새 digest 가 발행됨 — 보통 OS 보안패치(CVE 수정) 반영.\n- `patch`/`minor`: 도구 이미지의 신규 버전 릴리스.\n- merge 되면 이 컴포넌트를 쓰는 모든 파이프라인에 다음 실행부터 적용된다."
+      ]
+    },
+    {
+      "description": "cosign/trivy 버전 핀 — 버전 MR 에 sha256 핀을 공식 checksums.txt 로 자동 동기화(postUpgradeTasks)",
+      "matchDepNames": ["sigstore/cosign", "aquasecurity/trivy"],
+      "postUpgradeTasks": {
+        "commands": ["bash .renovate/update-checksums.sh"],
+        "fileFilters": ["templates/**/template.yml"],
+        "executionMode": "branch"
+      },
+      "prBodyNotes": [
+        "#### 왜 열렸나\n도구 신규 릴리스 감지 (위 릴리스 노트 참고 — 보안 수정 포함 여부 확인).\n`*_sha256` 핀은 `.renovate/update-checksums.sh` 가 공식 checksums.txt 에서 **자동 동기화**했다 — 버전과 체크섬이 어긋난 채 merge 될 수 없음."
+      ]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "sign/verify 컴포넌트의 cosign 버전 핀",
+      "fileMatch": ["^templates/.+/template\\.yml$"],
+      "matchStrings": ["cosign_version:\\s*\\n\\s*default:\\s*(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"],
+      "depNameTemplate": "sigstore/cosign",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "sign(및 scan 레거시 호환) 컴포넌트의 trivy 버전 핀",
+      "fileMatch": ["^templates/.+/template\\.yml$"],
+      "matchStrings": ["trivy_version:\\s*\\n\\s*default:\\s*(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"],
+      "depNameTemplate": "aquasecurity/trivy",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ]
+}
