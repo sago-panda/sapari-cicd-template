@@ -5,7 +5,7 @@ stages: [test, release]
 lint-components:
   stage: test
   image:
-    name: mikefarah/yq:4
+    name: mikefarah/yq:4@sha256:11a1f0b604b13dbbdc662260d8db6f644b22d8553122a25c1b5b2e8713ca6977
     entrypoint: [""]   # ENTRYPOINT(yq) 비워서 GitLab 이 sh 로 script 실행하게 함
   script:
     # ★ 루프 안에서 즉시 exit — for 루프는 마지막 명령의 종료코드만 남아 중간 실패가 묻힌다
@@ -23,7 +23,7 @@ lint-components:
 # 태그(semver) 푸시 시 CI/CD Catalog 에 컴포넌트 릴리스 게시
 create-release:
   stage: release
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  image: registry.gitlab.com/gitlab-org/release-cli:latest@sha256:3f52d526f48e8d10625c722fa6d6423ee82aadeae1b1aa91f07b62551d96dacf
   rules:
     - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+$/'
   script:
