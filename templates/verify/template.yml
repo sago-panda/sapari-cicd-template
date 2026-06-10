@@ -58,7 +58,7 @@ spec:
 ---
 verify:
   stage: $[[ inputs.stage ]]
-  image: alpine:3.22
+  image: alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601
   interruptible: true   # 더 새 커밋의 파이프라인이 시작되면 자동 취소 (최신 상태만 검증·승격하면 됨)
   rules:
     # changes 필터 없이 항상 실행 — "어떤 파일 변경이 이미지에 닿는가"를 룰이 추측하게 두면

@@ -13,8 +13,8 @@ spec:
 ---
 publish:
   stage: $[[ inputs.stage ]]
-  image: docker:27
-  services: [docker:27-dind]
+  image: docker:27@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
+  services: [docker:27-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce]
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
     DOCKER_HOST: tcp://docker:2376
