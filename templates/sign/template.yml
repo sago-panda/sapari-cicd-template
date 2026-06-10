@@ -15,10 +15,10 @@ spec:
     image:
       default: $CI_REGISTRY_IMAGE
     cosign_version:
-      default: v3.0.6
+      default: v3.1.1
     cosign_sha256:
       # cosign-linux-amd64 의 공식 sha256 (릴리스 cosign_checksums.txt) — 버전 올릴 때 같이 갱신
-      default: c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+      default: ae1ecd212663f3693ad9edf8b1a183900c9a52d3155ba6e354237f9a0f6463fc
     trivy_version:
       default: 0.71.0                   # 레거시 scan 컴포넌트와 버전 통일
     trivy_sha256:
