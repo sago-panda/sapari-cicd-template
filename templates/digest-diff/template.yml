@@ -15,10 +15,10 @@ spec:
     severity_detail:
       default: HIGH,CRITICAL              # 본문에 ID 까지 나열할 심각도 (나머지는 건수만)
     trivy_version:
-      default: 0.71.1                     # sign/scan 컴포넌트와 버전 통일
+      default: 0.72.0                     # sign/scan 컴포넌트와 버전 통일
     trivy_sha256:
       # trivy_<ver>_Linux-64bit.tar.gz 의 공식 sha256 — 버전 올릴 때 같이 갱신(Renovate 자동)
-      default: 3cbae37cd440cd8676e5ce9207fe460b5641c7579a17e9d00f8894928c41a88d
+      default: bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea
 ---
 digest-diff:
   stage: $[[ inputs.stage ]]
