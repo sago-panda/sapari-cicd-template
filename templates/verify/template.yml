@@ -51,10 +51,10 @@ spec:
     oidc_issuer:
       default: $CI_SERVER_URL                 # GitLab SaaS = https://gitlab.com
     cosign_version:
-      default: v3.1.1
+      default: v3.1.2
     cosign_sha256:
       # cosign-linux-amd64 의 공식 sha256 (릴리스 cosign_checksums.txt) — 버전 올릴 때 같이 갱신
-      default: ae1ecd212663f3693ad9edf8b1a183900c9a52d3155ba6e354237f9a0f6463fc
+      default: f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf
 ---
 verify:
   stage: $[[ inputs.stage ]]
