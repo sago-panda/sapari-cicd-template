@@ -21,7 +21,7 @@ spec:
 ---
 promote:
   stage: $[[ inputs.stage ]]
-  image: alpine:3.24@sha256:a2d49ea686c2adfe3c992e47dc3b5e7fa6e6b5055609400dc2acaeb241c829f4
+  image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
   interruptible: true   # 더 새 커밋의 파이프라인이 시작되면 자동 취소 — 구 커밋 promote 의 non-ff 거부 소음 방지
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'   # main 파이프라인에서만 (이전 stage 전부 성공해야 도달)
