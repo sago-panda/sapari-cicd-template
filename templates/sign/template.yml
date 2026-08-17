@@ -20,10 +20,10 @@ spec:
       # cosign-linux-amd64 의 공식 sha256 (릴리스 cosign_checksums.txt) — 버전 올릴 때 같이 갱신
       default: f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf
     trivy_version:
-      default: 0.72.0                   # 레거시 scan 컴포넌트와 버전 통일
+      default: 0.74.0                   # 레거시 scan 컴포넌트와 버전 통일
     trivy_sha256:
       # trivy_<ver>_Linux-64bit.tar.gz 의 공식 sha256 (릴리스 *_checksums.txt) — 버전 올릴 때 같이 갱신
-      default: bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea
+      default: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
 ---
 sign:
   stage: $[[ inputs.stage ]]
