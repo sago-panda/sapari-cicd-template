@@ -5,7 +5,7 @@ stages: [test, release]
 lint-components:
   stage: test
   image:
-    name: mikefarah/yq:4@sha256:11a1f0b604b13dbbdc662260d8db6f644b22d8553122a25c1b5b2e8713ca6977
+    name: mikefarah/yq:4@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
     entrypoint: [""]   # ENTRYPOINT(yq) 비워서 GitLab 이 sh 로 script 실행하게 함
   script:
     # ★ 루프 안에서 즉시 exit — for 루프는 마지막 명령의 종료코드만 남아 중간 실패가 묻힌다
